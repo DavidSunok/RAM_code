@@ -126,45 +126,57 @@ If you find this work helpful, please consider citing:
 ```
 
 ---
-CUDA 13.0+ / H20 GPU 环境搭建指南
-官方指南面向 Ubuntu 20.04 + CUDA 11.8 + Python 3.8，在新系统上不兼容（如 Ubuntu 22.04 + CUDA 13.0 + NVIDIA H20）。以下是在实际环境中测试通过的替代方案。
+---
 
-测试环境： Ubuntu 22.04, 8× NVIDIA H20-3e (143GB), CUDA Driver 13.0, Python 3.10, PyTorch 2.6.0+cu126
+## Environment Setup Guide for CUDA 13.0+ / H20 GPUs
 
-与官方指南的主要差异
-项目	官方	本指南
-Python	3.8	3.10（Python 3.8 已停止维护；新版 PyTorch 要求 3.9+）
-PyTorch	2.0.1+cu118	2.6.0+cu126
-编译用 CUDA Toolkit	系统 CUDA 11.8	本地安装的 CUDA 11.8 + 12.6 toolkit
-numpy	any	numpy<2.0（MinkowskiEngine 依赖 numpy.distutils）
-前置条件
-需要本地安装 CUDA 11.8 toolkit（编译 MinkowskiEngine/GSNet 用）和 CUDA 12.6 toolkit（编译 GroundingDINO 用）。从 NVIDIA CUDA Archive 下载：
+> The official guide targets Ubuntu 20.04 + CUDA 11.8 + Python 3.8, which is incompatible with newer systems (e.g. Ubuntu 22.04 + CUDA 13.0 + NVIDIA H20). Below is a tested alternative setup.
 
+**Tested environment:** Ubuntu 22.04, 8× NVIDIA H20-3e (143GB), CUDA Driver 13.0, Python 3.10, PyTorch 2.6.0+cu126
 
-# 安装 CUDA 11.8 toolkit 到本地目录（toolkit 本身不需要 root）
+### Key differences from the official guide
+
+| Item | Official | This guide |
+|------|----------|------------|
+| Python | 3.8 | 3.10 (Python 3.8 is EOL; newer PyTorch requires 3.9+) |
+| PyTorch | 2.0.1+cu118 | 2.6.0+cu126 |
+| CUDA Toolkit for compilation | system CUDA 11.8 | Locally installed CUDA 11.8 + 12.6 toolkits |
+| numpy | any | `numpy<2.0` (MinkowskiEngine requires `numpy.distutils`) |
+
+### Prerequisites
+
+You need **CUDA 11.8 toolkit** installed locally (for MinkowskiEngine/GSNet) and **CUDA 12.6 toolkit** (for GroundingDINO). Download from [NVIDIA CUDA Archive](https://developer.nvidia.com/cuda-toolkit-archive):
+
+```bash
+# Install CUDA 11.8 toolkit to a local directory (no root needed for the toolkit itself)
 sudo sh cuda_11.8.0_520.61.05_linux.run --toolkit --silent --installpath=/path/to/cuda-11.8
 
-# 安装 CUDA 12.6 toolkit
+# Install CUDA 12.6 toolkit
 sudo sh cuda_12.6.3_560.35.05_linux.run --toolkit --silent --installpath=/path/to/cuda-12.6
-逐步安装
-1. 创建 conda 环境，安装 GCC 11
+```
 
+### Step-by-step installation
 
+**1. Create conda environment with GCC 11**
+
+```bash
 conda create -n ram python=3.10
 conda activate ram
-# CUDA 11.8 编译需要 GCC 11
+# GCC 11 is required for CUDA 11.8 compilation compatibility
 conda install -c conda-forge gxx_linux-64=11 openblas-devel -c anaconda -y
 
-# PyTorch 2.6 + CUDA 12.6
+# PyTorch 2.6 with CUDA 12.6
 pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu126
 pip install "numpy<2.0"
-2. Grounded-SAM（需要 CUDA 12.6 toolkit）
+```
 
-需要打补丁： GroundingDINO 的 CUDA 代码使用了已废弃的 value.type() API。安装前编辑 vision/GroundedSAM/GroundingDINO/groundingdino/models/GroundingDINO/csrc/MsDeformAttn/ms_deform_attn_cuda.cu：
+**2. Grounded-SAM (requires CUDA 12.6 toolkit)**
 
-将 value.type() 替换为 value.scalar_type()（共 2 处：第 65 行和第 135 行）
+> **Patch required:** GroundingDINO's CUDA code uses deprecated `value.type()` API. Before installing, edit `vision/GroundedSAM/GroundingDINO/groundingdino/models/GroundingDINO/csrc/MsDeformAttn/ms_deform_attn_cuda.cu`:
+> - Replace `value.type()` with `value.scalar_type()` (2 occurrences: lines 65 and 135)
 
-# 创建假 nvcc，报告 CUDA 12.6 版本号，绕过版本不匹配检查
+```bash
+# Create a fake nvcc that reports CUDA 12.6 to bypass version mismatch check
 mkdir -p /path/to/cuda_126_faked/bin
 cat > /path/to/cuda_126_faked/bin/nvcc << 'EOF'
 #!/bin/bash
@@ -178,17 +190,19 @@ chmod +x /path/to/cuda_126_faked/bin/nvcc
 ln -s /path/to/cuda-12.6/include /path/to/cuda_126_faked/include
 ln -s /path/to/cuda-12.6/lib64 /path/to/cuda_126_faked/lib64
 
-# 用假 CUDA_HOME 安装
+# Install with fake CUDA_HOME
 CUDA_HOME=/path/to/cuda_126_faked pip install -e vision/GroundedSAM/GroundingDINO --no-build-isolation
 pip install -e vision/GroundedSAM/segment_anything
 wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth -P assets/ckpts/
 wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth -P assets/ckpts/
-3. MinkowskiEngine & GSNet（需要 CUDA 11.8 toolkit）
+```
 
-MinkowskiEngine 自带的 cudf 第三方头文件与 CUDA 12.6+ 的 thrust 冲突。用 CUDA 11.8 的头文件编译可以避免。
+**3. MinkowskiEngine & GSNet (requires CUDA 11.8 toolkit)**
 
+> The bundled cudf 3rdparty headers in MinkowskiEngine conflict with CUDA 12.6+ thrust. Using CUDA 11.8 headers avoids this.
 
-# 创建假 nvcc：报告 CUDA 12.6 版本号，但实际用 11.8 编译
+```bash
+# Create a fake nvcc that reports CUDA 12.6 but actually uses 11.8 for compilation
 mkdir -p /path/to/cuda_118_faked/bin
 cat > /path/to/cuda_118_faked/bin/nvcc << 'EOF'
 #!/bin/bash
@@ -214,22 +228,35 @@ pip install -r requirements.txt
 cd pointnet2 && CUDA_HOME=/path/to/cuda_118_faked python setup.py install && cd ..
 cd graspnetAPI && pip install . && cd ../..
 pip install "numpy<1.24" pytorch-utils
-4. pointnet2_ops
+```
 
+**4. pointnet2_ops**
 
+```bash
 git clone https://github.com/erikwijmans/Pointnet2_PyTorch.git
 cd Pointnet2_PyTorch/pointnet2_ops_lib
 CUDA_HOME=/path/to/cuda_118_faked pip install -e . --no-build-isolation
-5. 其他依赖
+```
 
+**5. 其他依赖**
 
-pip install "diffusers>=0.25" "transformers>=4.29" xformers==0.0.29.post2 \
-    accelerate open_clip_torch einops openai
-# xformers 可能拉高 PyTorch 版本，重新钉回来
+> 注意版本兼容性：diffusers、transformers、huggingface_hub 三者互相依赖，需要锁定兼容版本。
+
+```bash
+pip install "diffusers==0.27.2" "transformers>=4.29,<4.47" "huggingface_hub<0.24" \
+    xformers==0.0.29.post2 accelerate open_clip_torch einops openai
+# xformers 可能拉高 PyTorch 版本，务必重新固定
 pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu126
-常见问题
-RuntimeError: CUDA version mismatch：用上面描述的假 nvcc 包装器。PyTorch 的 cpp_extension 会检查 nvcc --version 并拒绝主版本号不匹配的情况。
-MinkowskiEngine 编译报 thrust::device / thrust::unary_function 错误：这是因为用了 CUDA 12.6+ 的头文件。换成 CUDA 11.8 toolkit 编译即可。
-openblas 报 _Float16 undefined：CUDA 11.8 的 nvcc 不支持 GCC 12+。通过 conda install -c conda-forge gxx_linux-64=11 安装 GCC 11。
-GroundingDINO 报 no suitable conversion from DeprecatedTypeProperties：按第 2 步打补丁，将 value.type() 改成 value.scalar_type()。
-xformers 把 PyTorch 版本拉高了：装完依赖后务必重新钉住版本：pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126。
+
+
+```markdown
+### 常见问题
+
+- **`RuntimeError: CUDA version mismatch`**：使用上述 fake nvcc 包装脚本绕过。PyTorch 的 `cpp_extension` 会检查 `nvcc --version` 并拒绝 major 版本不匹配的情况。
+- **MinkowskiEngine 编译报 `thrust::device` / `thrust::unary_function` 错误**：这是 CUDA 12.6+ 头文件的 thrust API 不兼容导致的。改用 CUDA 11.8 toolkit 编译即可。
+- **openblas 编译报 `_Float16` undefined**：CUDA 11.8 nvcc 不支持 GCC 12+。安装 GCC 11：`conda install -c conda-forge gxx_linux-64=11`。
+- **GroundingDINO 编译报 `no suitable conversion from DeprecatedTypeProperties`**：需修补源码，将 `value.type()` 改为 `value.scalar_type()`（见 Step 2）。
+- **xformers 把 PyTorch 拉到更高版本**：安装完依赖后务必重新固定 `pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu126`。
+- **diffusers 报 `cannot import name 'cached_download'` 或 `No module named 'diffusers.models.unet_2d_condition'`**：版本锁定为 `diffusers==0.27.2`、`transformers<4.47`、`huggingface_hub<0.24`，三者必须配套使用。
+- **运行 demo 报 `No such file or directory: 'assets/data/droid'`**：检索数据未下载或未解压到 `assets/data/`。下载后解压确保目录结构为 `assets/data/droid/`、`assets/data/HOI4D/`、`assets/data/customize/`。
+
